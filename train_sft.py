@@ -3,12 +3,6 @@
 基于 DeepSpeed + HuggingFace TRL 的SFT训练脚本，用于训练32B大模型
 使用 TRL SFTTrainer + DeepSpeed ZeRO 进行分布式训练
 
-使用方法：
-1. DeepSpeed训练（推荐）:
-   torchrun --nproc_per_node=8 train_sft_megatron.py --use_deepspeed ...
-
-2. 标准DDP训练:
-   torchrun --nproc_per_node=8 train_sft_megatron.py ...
 """
 
 import argparse
