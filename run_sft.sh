@@ -126,7 +126,7 @@ DEEPSPEED_CONFIG=""  # 留空使用默认配置，或指定配置文件路径
 CMD="/opt/conda/envs/python3.10.13/bin/torchrun \
     --standalone \
     --nproc_per_node=${NPROC_PER_NODE} \
-    train_sft_megatron.py \
+    train_sft.py \
     --model_name ${MODEL_NAME} \
     --output_dir ${OUTPUT_DIR} \
     --learning_rate ${LEARNING_RATE} \
