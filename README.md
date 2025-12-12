@@ -1,2 +1,7 @@
 # Train-32B-LLM
-Full Parameter, One Machine Multi GPUs
+## SFT
+Train: `sh run_sft.sh`
+
+## Dataset
+
+[COIG-CQIA](https://modelscope.cn/datasets/AI-ModelScope/COIG-CQIA)
