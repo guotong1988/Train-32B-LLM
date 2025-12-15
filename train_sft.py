@@ -3,12 +3,6 @@
 基于 DeepSpeed + HuggingFace TRL 的SFT训练脚本，用于训练32B大模型
 使用 TRL SFTTrainer + DeepSpeed ZeRO 进行分布式训练
 
-使用方法：
-1. DeepSpeed训练（推荐）:
-   torchrun --nproc_per_node=8 train_sft_megatron.py --use_deepspeed ...
-
-2. 标准DDP训练:
-   torchrun --nproc_per_node=8 train_sft_megatron.py ...
 """
 
 import argparse
@@ -441,8 +435,8 @@ def main() -> None:
                         help="使用8-bit优化器")
     parser.add_argument("--optim", type=str, default="adamw_torch",
                         help="优化器类型，如果使用8-bit优化器，应设置为adamw_8bit或paged_adamw_8bit")
-    parser.add_argument("--packing", action="store_true", default=True,
-                        help="启用序列打包以提高效率（默认启用，可减少padding浪费）")
+    parser.add_argument("--packing", action="store_true",
+                        help="启用序列打包以提高效率")
     
     # DeepSpeed专用优化选项
     parser.add_argument("--deepspeed_aggressive_memory", action="store_true",
@@ -642,10 +636,6 @@ def main() -> None:
         tokenizer=tokenizer,  # 传递tokenizer以使用chat template
     )
     print(f"训练集大小: {len(train_ds)}")
-    
-    # 如果启用packing，设置数据集缓存以加速
-    if args.packing and is_main_process:
-        print("序列打包已启用，将自动优化序列长度分布以减少padding")
 
     # 计算全局批次大小和训练步数
     global_batch_size = args.per_device_train_batch_size * args.gradient_accumulation_steps * world_size
@@ -695,20 +685,15 @@ def main() -> None:
         if args.use_deepspeed:
             if is_main_process:
                 print("使用 DeepSpeed：模型将加载到 CPU，由 DeepSpeed 处理设备分配")
-            # 注意：不要使用 device_map，因为 DeepSpeed 会自己处理设备分配
-            # 使用 device_map 可能导致返回字典而不是模型对象
             model = AutoModelForCausalLM.from_pretrained(
                 args.model_name,
                 trust_remote_code=True,
                 low_cpu_mem_usage=True,
                 torch_dtype=dtype,
-                # 不使用 device_map，直接加载到 CPU
+                device_map="cpu",  # 强制加载到 CPU，让 DeepSpeed 处理设备分配
             )
             # 确保模型所有参数都在 CPU 上
             model = model.cpu()
-            # 确保模型是模型对象而不是字典
-            if isinstance(model, dict):
-                raise ValueError("模型加载返回了字典而不是模型对象，请检查 transformers 版本")
             for param in model.parameters():
                 if param.is_cuda:
                     param.data = param.data.cpu()
@@ -743,45 +728,6 @@ def main() -> None:
         except Exception as e:
             if is_main_process:
                 print(f"警告: 启用梯度检查点失败: {e}")
-    
-    # PyTorch 2.5 兼容性修复：确保 _parameters 是 OrderedDict 类型（DeepSpeed 需要）
-    # 在 PyTorch 2.5 中，_parameters 从 OrderedDict 改为了 dict，导致 DeepSpeed 无法添加 _in_forward 属性
-    if args.use_deepspeed:
-        try:
-            from collections import OrderedDict
-            import torch.nn as nn
-            
-            # 检查 PyTorch 版本
-            torch_version = torch.__version__.split('.')
-            major, minor = int(torch_version[0]), int(torch_version[1])
-            
-            # 如果是 PyTorch 2.5+，需要修复 _parameters 类型
-            if major == 2 and minor >= 5:
-                if is_main_process:
-                    print("检测到 PyTorch 2.5+，应用 DeepSpeed 兼容性修复...")
-                
-                # 递归修复所有子模块的 _parameters
-                def fix_parameters_dict(module):
-                    """将模块的 _parameters 从 dict 转换为 OrderedDict"""
-                    if hasattr(module, '_parameters') and module._parameters is not None:
-                        if not isinstance(module._parameters, OrderedDict):
-                            # 保存原始参数
-                            params = dict(module._parameters)
-                            # 转换为 OrderedDict，保持顺序
-                            module._parameters = OrderedDict(params)
-                    
-                    # 递归处理所有子模块
-                    for child in module.children():
-                        fix_parameters_dict(child)
-                
-                fix_parameters_dict(model)
-                
-                if is_main_process:
-                    print("✓ DeepSpeed 兼容性修复已应用")
-        except Exception as e:
-            if is_main_process:
-                print(f"警告: DeepSpeed 兼容性修复失败: {e}")
-                print("  如果遇到 '_in_forward' 错误，请考虑降级 PyTorch 到 2.4 或更新 DeepSpeed")
     
     # 配置训练参数
     sft_cfg_kwargs = {
@@ -924,19 +870,27 @@ def main() -> None:
     # 创建SFTConfig
     sft_cfg = SFTConfig(**sft_cfg_kwargs)
 
-    # 创建 data collator（仅在未启用packing时使用）
-    # 注意：当 packing=True 时，TRL 使用 padding-free 模式，不支持自定义 data collator
-    if args.packing:
-        data_collator = None
-        if is_main_process:
-            print("序列打包已启用，将使用 TRL 内置的 padding-free data collator")
-    else:
+    # 创建 data collator（当 packing=True 时，TRL 会自动使用支持 packing 的 collator，不需要自定义）
+    trainer_kwargs = {
+        "model": model,
+        "args": sft_cfg,
+        "train_dataset": train_ds,
+        "processing_class": tokenizer,
+    }
+    
+    # 只有在 packing=False 时才使用自定义的 data_collator
+    # 当 packing=True 时，TRL 的 SFTTrainer 会自动使用支持 packing 的 data collator
+    if not args.packing:
         data_collator = DataCollatorForCausalLM(
             tokenizer=tokenizer,
             max_length=args.max_seq_length,
         )
+        trainer_kwargs["data_collator"] = data_collator
         if is_main_process:
-            print("使用自定义 data collator（packing 未启用）")
+            print("使用自定义 data collator（packing=False）")
+    else:
+        if is_main_process:
+            print("使用 TRL 默认的 packing-aware data collator（packing=True）")
 
     # 创建训练器
     if is_main_process:
@@ -947,26 +901,7 @@ def main() -> None:
         print(f"  梯度累积步数: {args.gradient_accumulation_steps}")
         print(f"  总训练步数: {total_train_steps}")
         if args.packing:
-            print(f"  序列打包: 已启用（减少padding浪费）")
-    
-    # 在创建 SFTTrainer 之前，确保模型对象是正确的类型（不是字典）
-    if isinstance(model, dict):
-        raise ValueError("错误: 模型对象是字典而不是模型实例。这可能是由于 transformers 版本问题导致的。")
-    
-    # 验证模型对象有必要的属性
-    if not hasattr(model, 'forward') or not hasattr(model, 'parameters'):
-        raise ValueError("错误: 模型对象缺少必要的属性（forward 或 parameters）。")
-    
-    # 构建 trainer kwargs
-    trainer_kwargs = {
-        "model": model,
-        "args": sft_cfg,
-        "train_dataset": train_ds,
-        "processing_class": tokenizer,
-    }
-    # 仅在未启用 packing 时传递 data_collator
-    if not args.packing:
-        trainer_kwargs["data_collator"] = data_collator
+            print(f"  序列打包 (Packing): 已启用（减少padding浪费，提高GPU利用率）")
     
     trainer = SFTTrainer(**trainer_kwargs)
     
@@ -997,25 +932,6 @@ def main() -> None:
     # 开始训练
     try:
         trainer.train()
-    except AttributeError as e:
-        error_msg = str(e)
-        if "_in_forward" in error_msg and "dict" in error_msg:
-            if is_main_process:
-                print("\n" + "="*50)
-                print("DeepSpeed 兼容性错误诊断:")
-                print("="*50)
-                print("错误: AttributeError: 'dict' object has no attribute '_in_forward'")
-                print("\n原因:")
-                print("这是 PyTorch 2.5+ 与 DeepSpeed 的兼容性问题。")
-                print("在 PyTorch 2.5 中，module._parameters 从 OrderedDict 改为了 dict，")
-                print("导致 DeepSpeed 无法添加 _in_forward 属性。")
-                print("\n解决方案:")
-                print("1. 降级 PyTorch 到 2.4: pip install torch==2.4.*")
-                print("2. 更新 DeepSpeed 到最新版本: pip install --upgrade deepspeed")
-                print("3. 如果问题仍然存在，请检查 DeepSpeed GitHub 是否有相关修复")
-                print("="*50)
-            raise RuntimeError(f"DeepSpeed 兼容性错误: {error_msg}\n请参考上面的解决方案。") from e
-        raise
     except RuntimeError as e:
         error_msg = str(e)
         if is_main_process:
