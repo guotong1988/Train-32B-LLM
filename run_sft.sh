@@ -2,6 +2,7 @@
 
 # 基于 DeepSpeed + HuggingFace TRL 的32B模型SFT训练脚本
 # 使用 TRL SFTTrainer + DeepSpeed ZeRO 进行分布式训练
+# 使用方法: bash run_sft_megatron.sh 或 ./run_sft_megatron.sh
 
 # 设置脚本在遇到错误时退出
 set -e
@@ -24,15 +25,15 @@ mkdir -p "${LOGS_DIR}"
 
 # 生成日志文件名（带时间戳）
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="${LOGS_DIR}/sft_train_${TIMESTAMP}.log"
+LOG_FILE="${LOGS_DIR}/sft_megatron_train_${TIMESTAMP}.log"
 
 # ============================================
 # 训练参数配置（32B模型专用）
 # ============================================
 
 # 模型配置
-MODEL_NAME="/data/Qwen3-32B"
-OUTPUT_DIR="/data/outputs-sft-32b"
+MODEL_NAME="/data/oss_bucket_0/Qwen3-32B"
+OUTPUT_DIR="/data/oss_bucket_0/outputs-sft-megatron-32b"
 
 # 数据集配置
 DATASET=""  # 留空使用默认数据集
@@ -60,7 +61,7 @@ USE_BF16="--bf16"  # 使用bfloat16精度（推荐用于A100/H100等GPU）
 # USE_FP16="--fp16"  # 如果GPU不支持BF16，使用FP16
 GRADIENT_CHECKPOINTING="--gradient_checkpointing"  # 必须启用以节省显存
 USE_8BIT_OPTIMIZER=""  # 8-bit优化器选项
-PACKING="--packing"  # 启用序列打包以提高效率（默认启用，减少padding浪费）
+PACKING="--packing"  # 启用序列打包以提高效率（默认启用，减少padding浪费，提高GPU利用率）
 
 # ============================================
 # DeepSpeed专用OOM优化选项（不使用LoRA）
@@ -126,7 +127,7 @@ DEEPSPEED_CONFIG=""  # 留空使用默认配置，或指定配置文件路径
 CMD="/opt/conda/envs/python3.10.13/bin/torchrun \
     --standalone \
     --nproc_per_node=${NPROC_PER_NODE} \
-    train_sft.py \
+    train_sft_megatron.py \
     --model_name ${MODEL_NAME} \
     --output_dir ${OUTPUT_DIR} \
     --learning_rate ${LEARNING_RATE} \
@@ -266,7 +267,7 @@ fi
         echo "8-bit优化器: 已启用（可节省约50-75%优化器显存）"
     fi
     if [ -n "${PACKING}" ]; then
-        echo "序列打包: 已启用（减少padding浪费，提升训练效率）"
+        echo "序列打包 (Packing): 已启用（减少padding浪费，提高GPU利用率）"
     fi
     echo ""
     echo "--- DeepSpeed专用OOM优化选项 ---"
@@ -311,8 +312,8 @@ if ! command -v python &> /dev/null; then
 fi
 
 # 检查训练脚本是否存在
-if [ ! -f "train_sft.py" ]; then
-    echo "错误: 未找到train_sft.py文件"
+if [ ! -f "train_sft_megatron.py" ]; then
+    echo "错误: 未找到train_sft_megatron.py文件"
     exit 1
 fi
 
