@@ -2,7 +2,6 @@
 
 # 基于 DeepSpeed + HuggingFace TRL 的32B模型SFT训练脚本
 # 使用 TRL SFTTrainer + DeepSpeed ZeRO 进行分布式训练
-# 使用方法: bash run_sft.sh 或 ./run_sft.sh
 
 # 设置脚本在遇到错误时退出
 set -e
@@ -32,8 +31,8 @@ LOG_FILE="${LOGS_DIR}/sft_train_${TIMESTAMP}.log"
 # ============================================
 
 # 模型配置
-MODEL_NAME="/data/Qwen3-32B"
-OUTPUT_DIR="/data/outputs-sft-32b"
+MODEL_NAME="/data/oss_bucket_0/Qwen3-32B"
+OUTPUT_DIR="/data/oss_bucket_0/outputs-sft-32b"
 
 # 数据集配置
 DATASET=""  # 留空使用默认数据集
@@ -50,7 +49,7 @@ WARMUP_STEPS=500
 SEED=42
 
 # 保存和日志配置
-SAVE_STEPS=500  # 32B模型保存检查点较慢，适当增加间隔
+SAVE_STEPS=5000  # 32B模型保存检查点较慢，适当增加间隔
 LOGGING_STEPS=10
 EVAL_STRATEGY="no"
 EVAL_STEPS=500
@@ -61,6 +60,7 @@ USE_BF16="--bf16"  # 使用bfloat16精度（推荐用于A100/H100等GPU）
 # USE_FP16="--fp16"  # 如果GPU不支持BF16，使用FP16
 GRADIENT_CHECKPOINTING="--gradient_checkpointing"  # 必须启用以节省显存
 USE_8BIT_OPTIMIZER=""  # 8-bit优化器选项
+PACKING="--packing"  # 启用序列打包以提高效率（默认启用，减少padding浪费）
 
 # ============================================
 # DeepSpeed专用OOM优化选项（不使用LoRA）
@@ -184,6 +184,10 @@ if [ -n "${USE_8BIT_OPTIMIZER}" ]; then
     CMD="${CMD} ${USE_8BIT_OPTIMIZER}"
 fi
 
+if [ -n "${PACKING}" ]; then
+    CMD="${CMD} ${PACKING}"
+fi
+
 # 添加DeepSpeed专用优化选项
 if [ -n "${DEEPSPEED_AGGRESSIVE_MEMORY}" ]; then
     CMD="${CMD} ${DEEPSPEED_AGGRESSIVE_MEMORY}"
@@ -260,6 +264,9 @@ fi
     fi
     if [ -n "${USE_8BIT_OPTIMIZER}" ]; then
         echo "8-bit优化器: 已启用（可节省约50-75%优化器显存）"
+    fi
+    if [ -n "${PACKING}" ]; then
+        echo "序列打包: 已启用（减少padding浪费，提升训练效率）"
     fi
     echo ""
     echo "--- DeepSpeed专用OOM优化选项 ---"
