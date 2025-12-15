@@ -31,8 +31,8 @@ LOG_FILE="${LOGS_DIR}/sft_train_${TIMESTAMP}.log"
 # ============================================
 
 # 模型配置
-MODEL_NAME="/data/oss_bucket_0/Qwen3-32B"
-OUTPUT_DIR="/data/oss_bucket_0/outputs-sft-32b"
+MODEL_NAME="/data/Qwen3-32B"
+OUTPUT_DIR="/data/outputs-sft-32b"
 
 # 数据集配置
 DATASET=""  # 留空使用默认数据集
