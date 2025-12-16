@@ -42,7 +42,7 @@ TEXT_COLUMN="text"
 # 训练超参数（32B模型优化配置）
 LEARNING_RATE=1e-5  # 32B模型建议使用较小的学习率
 BATCH_SIZE=1  # 每个GPU的批次大小（32B模型需要很小的batch size）
-GRADIENT_ACCUMULATION_STEPS=1  # 增加梯度累积以补偿小batch size（32B模型需要大梯度累积）
+GRADIENT_ACCUMULATION_STEPS=8  # 增加梯度累积以补偿小batch size（32B模型需要大梯度累积）
 NUM_EPOCHS=3
 MAX_SEQ_LENGTH=1024  # 减小序列长度以节省显存（从2048减小到1024）
 WARMUP_STEPS=500
