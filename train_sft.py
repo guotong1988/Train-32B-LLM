@@ -438,19 +438,19 @@ def main() -> None:
     parser.add_argument("--packing", action="store_true",
                         help="启用序列打包以提高效率")
     
-    # DeepSpeed专用优化选项
+    # DeepSpeed专用优化选项（注意：默认配置已对齐 ds_zero3.json，以下选项已不再使用）
     parser.add_argument("--deepspeed_aggressive_memory", action="store_true",
-                        help="启用DeepSpeed激进内存优化（更小的bucket size等）")
+                        help="[已废弃] 默认配置已对齐 ds_zero3.json，此选项不再使用")
     parser.add_argument("--deepspeed_cpu_offload", action="store_true", default=True,
-                        help="启用DeepSpeed CPU Offload（优化器和参数都offload到CPU）")
+                        help="[已废弃] 默认配置已对齐 ds_zero3.json，此选项不再使用")
     parser.add_argument("--deepspeed_offload_optimizer", action="store_true", default=True,
-                        help="启用优化器CPU Offload")
+                        help="[已废弃] 默认配置已对齐 ds_zero3.json，此选项不再使用")
     parser.add_argument("--deepspeed_offload_param", action="store_true", default=True,
-                        help="启用参数CPU Offload（Stage 3专用）")
+                        help="[已废弃] 默认配置已对齐 ds_zero3.json，此选项不再使用")
     parser.add_argument("--deepspeed_reduce_bucket_size", type=int, default=None,
-                        help="自定义reduce bucket size（字节，默认自动）")
+                        help="[已废弃] 默认配置已对齐 ds_zero3.json，此选项不再使用")
     parser.add_argument("--deepspeed_stage3_max_live_params", type=int, default=None,
-                        help="自定义Stage 3最大活跃参数数（默认自动）")
+                        help="[已废弃] 默认配置已对齐 ds_zero3.json，此选项不再使用")
 
     # 分布式训练参数
     parser.add_argument("--use_deepspeed", action="store_true",
@@ -791,80 +791,48 @@ def main() -> None:
             if is_main_process:
                 print(f"使用DeepSpeed配置文件: {args.deepspeed_config}")
         else:
-            # 使用默认DeepSpeed配置（ZeRO Stage 3，最大内存节省）
-            enable_optimizer_offload = args.deepspeed_offload_optimizer if hasattr(args, 'deepspeed_offload_optimizer') else True
-            enable_param_offload = args.deepspeed_offload_param if hasattr(args, 'deepspeed_offload_param') else True
-            
-            # 根据激进内存优化选项调整参数
-            if args.deepspeed_aggressive_memory:
-                reduce_bucket_size = args.deepspeed_reduce_bucket_size if args.deepspeed_reduce_bucket_size else 5e6  # 5MB
-                stage3_prefetch_bucket_size = 2e6  # 2MB
-                stage3_param_persistence_threshold = 1e4
-                stage3_max_live_parameters = args.deepspeed_stage3_max_live_params if args.deepspeed_stage3_max_live_params else 5e7  # 5千万
-                stage3_max_reuse_distance = 5e7  # 5千万
-                allgather_bucket_size = 5e6  # 5MB
-                if is_main_process:
-                    print("⚠️  启用DeepSpeed激进内存优化模式（最大化显存节省）")
-            else:
-                reduce_bucket_size = args.deepspeed_reduce_bucket_size if args.deepspeed_reduce_bucket_size else 2e7  # 20MB
-                stage3_prefetch_bucket_size = 1e7  # 10MB
-                stage3_param_persistence_threshold = 1e5
-                stage3_max_live_parameters = args.deepspeed_stage3_max_live_params if args.deepspeed_stage3_max_live_params else 2e8  # 2亿
-                stage3_max_reuse_distance = 2e8  # 2亿
-                allgather_bucket_size = 2e7  # 20MB
-            
+            # 使用默认DeepSpeed配置（对齐 ds_zero3.json）
             if is_main_process:
-                print("使用默认DeepSpeed配置（ZeRO Stage 3，最大化内存节省）")
-                if enable_optimizer_offload:
-                    print("  ✓ 优化器CPU Offload: 已启用")
-                if enable_param_offload:
-                    print("  ✓ 参数CPU Offload: 已启用")
+                print("使用默认DeepSpeed配置（对齐 ds_zero3.json）")
             
-            # 构建ZeRO配置
+            # 构建ZeRO配置（对齐 ds_zero3.json）
             zero_config = {
                 "stage": 3,
-                "overlap_comm": False,  # 关闭重叠通信，避免死锁
+                "overlap_comm": True,
                 "contiguous_gradients": True,
-                "reduce_bucket_size": int(reduce_bucket_size),
-                "stage3_prefetch_bucket_size": int(stage3_prefetch_bucket_size),
-                "stage3_param_persistence_threshold": int(stage3_param_persistence_threshold),
-                "stage3_max_live_parameters": int(stage3_max_live_parameters),
-                "stage3_max_reuse_distance": int(stage3_max_reuse_distance),
-                "stage3_gather_16bit_weights_on_model_save": True,
-                "allgather_partitions": True,
-                "allgather_bucket_size": int(allgather_bucket_size),
-                "reduce_scatter": True,
-                "round_robin_gradients": False
+                "sub_group_size": 1e9,
+                "reduce_bucket_size": "auto",
+                "stage3_prefetch_bucket_size": "auto",
+                "stage3_param_persistence_threshold": "auto",
+                "stage3_max_live_parameters": 1e9,
+                "stage3_max_reuse_distance": 1e9,
+                "stage3_gather_16bit_weights_on_model_save": True
             }
             
-            # 添加优化器offload配置
-            if enable_optimizer_offload:
-                zero_config["offload_optimizer"] = {
-                    "device": "cpu",
-                    "pin_memory": False
-                }
+            # 构建fp16配置（对齐 ds_zero3.json）
+            fp16_config = {
+                "enabled": "auto",
+                "loss_scale": 0,
+                "loss_scale_window": 1000,
+                "initial_scale_power": 16,
+                "hysteresis": 2,
+                "min_loss_scale": 1
+            }
             
-            # 添加参数offload配置（Stage 3专用）
-            if enable_param_offload:
-                zero_config["offload_param"] = {
-                    "device": "cpu",
-                    "pin_memory": False
-                }
+            # 构建bf16配置（对齐 ds_zero3.json）
+            bf16_config = {
+                "enabled": "auto"
+            }
             
             sft_cfg_kwargs["deepspeed"] = {
+                "train_batch_size": "auto",
+                "train_micro_batch_size_per_gpu": "auto",
+                "gradient_accumulation_steps": "auto",
+                "gradient_clipping": "auto",
+                "zero_allow_untested_optimizer": True,
                 "zero_optimization": zero_config,
-                "gradient_accumulation_steps": args.gradient_accumulation_steps,
-                "gradient_clipping": 1.0,
-                "train_batch_size": global_batch_size,
-                "train_micro_batch_size_per_gpu": args.per_device_train_batch_size,
-                "bf16": {
-                    "enabled": args.bf16
-                },
-                "fp16": {
-                    "enabled": args.fp16 and not args.bf16
-                },
-                "wall_clock_breakdown": False,
-                "steps_per_print": args.logging_steps,
+                "fp16": fp16_config,
+                "bf16": bf16_config
             }
 
     # 创建SFTConfig
@@ -910,7 +878,7 @@ def main() -> None:
         if is_main_process:
             print("\n✓ DeepSpeed 配置已就绪")
             print("  模型当前在 CPU 上，DeepSpeed 将在训练开始时自动分片到所有 GPU")
-            print("  使用 ZeRO Stage 3 + CPU Offload，最大化内存节省")
+            print("  使用 ZeRO Stage 3（配置已对齐 ds_zero3.json）")
         
         # 同步所有进程
         if args.local_rank != -1 and dist.is_initialized():
@@ -954,7 +922,7 @@ def main() -> None:
                 print("2. 减小 max_seq_length")
                 print("3. 增加 gradient_accumulation_steps 来补偿")
                 print("4. 确保启用了 gradient_checkpointing")
-                print("5. 如果使用 DeepSpeed，考虑启用 CPU offload")
+                print("5. 如果使用 DeepSpeed，可以考虑使用自定义配置文件")
                 print("="*50)
         raise
     
