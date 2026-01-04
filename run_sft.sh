@@ -63,19 +63,17 @@ USE_8BIT_OPTIMIZER=""  # 8-bit优化器选项
 PACKING="--packing"  # 启用序列打包以提高效率（默认启用，减少padding浪费，提高GPU利用率）
 
 # ============================================
-# DeepSpeed专用OOM优化选项（不使用LoRA）
+# DeepSpeed配置选项
 # ============================================
-# 激进内存优化模式（最激进的显存节省，可节省额外20-30%显存）
-DEEPSPEED_AGGRESSIVE_MEMORY=""  # 启用激进内存优化，取消注释以启用
-# DEEPSPEED_AGGRESSIVE_MEMORY="--deepspeed_aggressive_memory"
-
-# CPU Offload选项（默认启用，可节省大量显存）
-DEEPSPEED_OFFLOAD_OPTIMIZER="--deepspeed_offload_optimizer"  # 优化器CPU Offload（默认启用）
-DEEPSPEED_OFFLOAD_PARAM="--deepspeed_offload_param"  # 参数CPU Offload（Stage 3专用，默认启用）
-
-# 自定义DeepSpeed参数（可选，留空使用默认值）
-# DEEPSPEED_REDUCE_BUCKET_SIZE="--deepspeed_reduce_bucket_size 5000000"  # 5MB（激进模式）
-# DEEPSPEED_STAGE3_MAX_LIVE_PARAMS="--deepspeed_stage3_max_live_params 50000000"  # 5千万（激进模式）
+# 注意：默认配置已对齐到 ds_zero3.json
+# 如果需要使用自定义配置，请通过 DEEPSPEED_CONFIG 指定配置文件路径
+# 以下选项在默认配置下不再使用（代码中已移除相关逻辑）
+# 
+# DEEPSPEED_AGGRESSIVE_MEMORY=""  # 已移除，不再使用
+# DEEPSPEED_OFFLOAD_OPTIMIZER=""  # 已移除，不再使用（ds_zero3.json 不使用 CPU offload）
+# DEEPSPEED_OFFLOAD_PARAM=""  # 已移除，不再使用（ds_zero3.json 不使用 CPU offload）
+# DEEPSPEED_REDUCE_BUCKET_SIZE=""  # 已移除，使用 "auto"
+# DEEPSPEED_STAGE3_MAX_LIVE_PARAMS=""  # 已移除，使用固定值 1e9
 
 # 其他选项
 DATALOADER_NUM_WORKERS=0  # 减少数据加载器工作进程数以节省内存（AMD GPU建议设为0）
@@ -84,7 +82,7 @@ DATALOADER_PIN_MEMORY=""  # AMD GPU建议禁用pin_memory以节省内存
 # ============================================
 # 分布式训练配置
 # ============================================
-# 对于32B模型，使用 DeepSpeed ZeRO Stage 3 + CPU Offload
+# 对于32B模型，使用 DeepSpeed ZeRO Stage 3（配置已对齐 ds_zero3.json）
 
 export CUDA_VISIBLE_DEVICES='0,1,2,3,4,5,6,7'  # 使用8个GPU
 NPROC_PER_NODE=8  # 总GPU数量
@@ -109,9 +107,9 @@ export TORCH_DISTRIBUTED_DEBUG=DETAIL  # 详细的分布式调试信息（可选
 USE_DEEPSPEED="--use_deepspeed"  # 使用DeepSpeed（支持ZeRO优化）
 
 # DeepSpeed配置（如果使用DeepSpeed）
-# 可以指定配置文件路径，或使用代码中的默认配置（ZeRO Stage 3 + CPU Offload）
-DEEPSPEED_CONFIG=""  # 留空使用默认配置，或指定配置文件路径
-# DEEPSPEED_CONFIG="--deepspeed_config /path/to/deepspeed_config.json"
+# 可以指定配置文件路径（如 ds_zero3.json），或使用代码中的默认配置（已对齐 ds_zero3.json）
+DEEPSPEED_CONFIG=""  # 留空使用默认配置（对齐 ds_zero3.json），或指定配置文件路径
+# DEEPSPEED_CONFIG="--deepspeed_config ds_zero3.json"  # 使用指定的配置文件
 
 # ============================================
 # 构建训练命令
@@ -188,26 +186,12 @@ if [ -n "${PACKING}" ]; then
     CMD="${CMD} ${PACKING}"
 fi
 
-# 添加DeepSpeed专用优化选项
-if [ -n "${DEEPSPEED_AGGRESSIVE_MEMORY}" ]; then
-    CMD="${CMD} ${DEEPSPEED_AGGRESSIVE_MEMORY}"
-fi
-
-if [ -n "${DEEPSPEED_OFFLOAD_OPTIMIZER}" ]; then
-    CMD="${CMD} ${DEEPSPEED_OFFLOAD_OPTIMIZER}"
-fi
-
-if [ -n "${DEEPSPEED_OFFLOAD_PARAM}" ]; then
-    CMD="${CMD} ${DEEPSPEED_OFFLOAD_PARAM}"
-fi
-
-if [ -n "${DEEPSPEED_REDUCE_BUCKET_SIZE}" ]; then
-    CMD="${CMD} ${DEEPSPEED_REDUCE_BUCKET_SIZE}"
-fi
-
-if [ -n "${DEEPSPEED_STAGE3_MAX_LIVE_PARAMS}" ]; then
-    CMD="${CMD} ${DEEPSPEED_STAGE3_MAX_LIVE_PARAMS}"
-fi
+# 添加DeepSpeed专用优化选项（已移除，默认配置已对齐 ds_zero3.json）
+# 如果需要自定义配置，请使用 DEEPSPEED_CONFIG 指定配置文件
+# if [ -n "${DEEPSPEED_AGGRESSIVE_MEMORY}" ]; then
+#     CMD="${CMD} ${DEEPSPEED_AGGRESSIVE_MEMORY}"
+# fi
+# ... 其他选项已移除
 
 if [ "${EVAL_STRATEGY}" != "no" ]; then
     CMD="${CMD} --eval_steps ${EVAL_STEPS}"
@@ -245,7 +229,7 @@ fi
         if [ -n "${DEEPSPEED_CONFIG}" ]; then
             echo "DeepSpeed配置: ${DEEPSPEED_CONFIG}"
         else
-            echo "DeepSpeed配置: 默认 (ZeRO Stage 3 + CPU Offload)"
+            echo "DeepSpeed配置: 默认（已对齐 ds_zero3.json）"
         fi
     else
         echo "训练方案: DDP + TRL SFTTrainer"
@@ -269,27 +253,18 @@ fi
         echo "序列打包 (Packing): 已启用（减少padding浪费，提高GPU利用率）"
     fi
     echo ""
-    echo "--- DeepSpeed专用OOM优化选项 ---"
+    echo "--- DeepSpeed配置信息 ---"
     if [ -n "${USE_DEEPSPEED}" ]; then
-        if [ -n "${DEEPSPEED_AGGRESSIVE_MEMORY}" ]; then
-            echo "⚠️  激进内存优化: 已启用（可额外节省20-30%显存）"
+        if [ -n "${DEEPSPEED_CONFIG}" ]; then
+            echo "使用自定义配置文件: ${DEEPSPEED_CONFIG}"
         else
-            echo "激进内存优化: 未启用（标准模式）"
-        fi
-        if [ -n "${DEEPSPEED_OFFLOAD_OPTIMIZER}" ]; then
-            echo "✓ 优化器CPU Offload: 已启用"
-        fi
-        if [ -n "${DEEPSPEED_OFFLOAD_PARAM}" ]; then
-            echo "✓ 参数CPU Offload: 已启用（Stage 3专用）"
-        fi
-        if [ -n "${DEEPSPEED_REDUCE_BUCKET_SIZE}" ]; then
-            echo "  自定义reduce_bucket_size: ${DEEPSPEED_REDUCE_BUCKET_SIZE}"
-        fi
-        if [ -n "${DEEPSPEED_STAGE3_MAX_LIVE_PARAMS}" ]; then
-            echo "  自定义stage3_max_live_parameters: ${DEEPSPEED_STAGE3_MAX_LIVE_PARAMS}"
+            echo "使用默认配置（已对齐 ds_zero3.json）"
+            echo "  - ZeRO Stage 3"
+            echo "  - overlap_comm: true"
+            echo "  - 参数使用 'auto' 自动优化"
         fi
     else
-        echo "DeepSpeed优化选项: 未启用（未使用DeepSpeed）"
+        echo "DeepSpeed: 未启用（未使用DeepSpeed）"
     fi
     echo ""
     echo "--- 其他配置 ---"
